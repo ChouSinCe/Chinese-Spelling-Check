@@ -137,7 +137,7 @@
   <div class="mic-banner" id="micBanner" hidden>🎤 This browser doesn't support speech recognition — try Chrome. You can still tap words and listen to the audio.</div>
 
   <main class="story-card" id="storyCard"></main>
-  <footer class="note">Tap any word to hear its pinyin. Tap 🔊 to hear it. Tap 🎤 and read it yourself — it checks automatically.<br><span style="opacity:.5;">build v6</span></footer>
+  <footer class="note">Tap any word to hear its pinyin. Tap 🔊 to hear it. Tap 🎤 and read it yourself — it checks automatically.<br><span style="opacity:.5;">build v7</span></footer>
 </div>
 
 <div class="tooltip" id="tooltip" role="status"></div>
@@ -288,6 +288,7 @@
     var line = '<div class="hanzi">';
     targetOps.forEach(function(o){
       if (o.type === "match") line += '<span class="rf-correct">' + o.c + '</span>';
+      else if (testMode){ line += '<span class="' + (o.type === "sub" ? "rf-wrong" : "rf-missing") + '">' + o.c + '</span>'; wrongChars.push(o.c); }
       else if (o.type === "sub"){ line += '<ruby class="rf-wrong" title="You said: ' + o.heard + '">' + o.c + '<rt>' + o.py + '</rt></ruby>'; wrongChars.push(o.c); }
       else { line += '<ruby class="rf-missing" title="Skipped">' + o.c + '<rt>' + o.py + '</rt></ruby>'; wrongChars.push(o.c); }
     });
