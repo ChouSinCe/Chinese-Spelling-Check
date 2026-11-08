@@ -1,4 +1,4 @@
-const CACHE = "hanzi-trail-v7";
+const CACHE = "hanzi-trail-v8";
 const ASSETS = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", function(e){

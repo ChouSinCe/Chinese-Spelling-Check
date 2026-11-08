@@ -82,6 +82,10 @@
   ruby { ruby-align: center; }
   rt { font-family: 'Baloo 2', system-ui, sans-serif; font-size: 0.36em; font-weight: 700; color: var(--sky); visibility: hidden; }
   .pinyin-on rt { visibility: visible; }
+  .en-line { display: none; font-family: 'Baloo 2', system-ui, sans-serif; font-size: 15px; font-weight: 600; color: var(--ink-soft); margin: -6px 0 4px; cursor: pointer; }
+  .english-on .en-line { display: block; }
+  .en-line.pending { opacity: .5; font-style: italic; }
+  .en-edit { width: 100%; box-sizing: border-box; font-size: 14px; border: 1px solid var(--card-border); border-radius: 8px; padding: 6px 8px; background: var(--bg); color: var(--ink); font-family: inherit; margin: 2px 0 10px; }
   .tok { font: inherit; background: none; border: none; cursor: pointer; color: inherit; padding: 0 1px; border-radius: 6px; }
   .tok:hover, .tok:focus-visible { background: var(--gold-soft); }
   .punct { font-size: 26px; color: var(--ink-soft); }
@@ -129,6 +133,7 @@
 
   <div class="toggles">
     <button class="toggle-btn" id="pinyinToggle" aria-pressed="false" type="button">Show pinyin</button>
+    <button class="toggle-btn" id="englishToggle" aria-pressed="false" type="button">Show English</button>
     <button class="toggle-btn" id="speakAllBtn" type="button">🔊 Read all</button>
     <button class="toggle-btn" id="shuffleBtn" type="button">🔀 Shuffle order</button>
     <button class="toggle-btn" id="testModeBtn" aria-pressed="false" type="button">🧪 Start Testing</button>
@@ -137,7 +142,7 @@
   <div class="mic-banner" id="micBanner" hidden>🎤 This browser doesn't support speech recognition — try Chrome. You can still tap words and listen to the audio.</div>
 
   <main class="story-card" id="storyCard"></main>
-  <footer class="note">Tap any word to hear its pinyin. Tap 🔊 to hear it. Tap 🎤 and read it yourself — it checks automatically.<br><span style="opacity:.5;">build v7</span></footer>
+  <footer class="note">Tap any word to hear its pinyin. Tap 🔊 to hear it. Tap 🎤 and read it yourself — it checks automatically.<br><span style="opacity:.5;">build v8</span></footer>
 </div>
 
 <div class="tooltip" id="tooltip" role="status"></div>
@@ -207,7 +212,9 @@
   var speakAllBtn = document.getElementById("speakAllBtn");
   var testModeBtn = document.getElementById("testModeBtn");
   var tooltip = document.getElementById("tooltip");
+  var englishToggle = document.getElementById("englishToggle");
   var pinyinOn = false;
+  var englishOn = false;
   var testMode = false;
 
   function sentencePlainText(sentence){ return sentence.map(function(tok){ return tok[0]; }).join(""); }
@@ -220,6 +227,39 @@
       window.speechSynthesis.cancel();
       window.speechSynthesis.speak(utter);
     } catch(e){}
+  }
+
+  // English translation: Google's free endpoint first, MyMemory as a fallback.
+  function translateToEnglish(text){
+    var q = encodeURIComponent(text);
+    return fetch("https://translate.googleapis.com/translate_a/single?client=gtx&sl=zh-CN&tl=en&dt=t&q=" + q)
+      .then(function(r){ if (!r.ok) throw 0; return r.json(); })
+      .then(function(d){ var t = d[0].map(function(x){ return x[0]; }).join(""); if (!t) throw 0; return t; })
+      .catch(function(){
+        return fetch("https://api.mymemory.translated.net/get?langpair=zh-CN|en&q=" + q)
+          .then(function(r){ return r.json(); })
+          .then(function(d){ return (d && d.responseData && d.responseData.translatedText) || ""; });
+      })
+      .catch(function(){ return ""; });
+  }
+
+  function escapeHtml(t){ return String(t).replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+
+  var translating = {};
+  function fillMissingEnglish(){
+    if (!englishOn || testMode) return;
+    customSentences.forEach(function(entry){
+      if (entry.en || translating[entry.id]) return;
+      translating[entry.id] = true;
+      translateToEnglish(sentencePlainText(entry.tokens)).then(function(en){
+        delete translating[entry.id];
+        if (!en) return;
+        entry.en = en;
+        saveState();
+        var el = storyCard.querySelector('[data-en-id="' + entry.id + '"]');
+        if (el){ el.textContent = en; el.classList.remove("pending"); }
+      });
+    });
   }
 
   function isHanzi(ch){ return /[\u4e00-\u9fa5]/.test(ch); }
@@ -374,13 +414,30 @@
         if (!testMode) html += '<button type="button" class="speak-btn" data-speak-s="' + sIdx + '" aria-label="Hear this sentence">🔊</button>';
         html += '<button type="button" class="mic-btn" data-mic-s="' + sIdx + '" aria-label="Read this sentence and get checked">🎤</button>';
         if (!testMode) html += '<button type="button" class="delete-sentence-btn" data-del-s="' + sIdx + '" aria-label="Remove this sentence" title="Remove">🗑️</button>';
-        html += '</div></div><div class="reading-feedback" id="fb-' + sIdx + '" hidden></div></div>';
+        html += '</div></div>';
+        if (!testMode) html += '<div class="en-line' + (entry.en ? '' : ' pending') + '" data-en-id="' + entry.id + '" title="Tap to edit">' + (entry.en ? escapeHtml(entry.en) : 'Translating…') + '</div>';
+        html += '<div class="reading-feedback" id="fb-' + sIdx + '" hidden></div></div>';
       });
       html += '</div>';
     }
 
     storyCard.innerHTML = html;
     storyCard.classList.toggle("pinyin-on", pinyinOn && !testMode);
+    storyCard.classList.toggle("english-on", englishOn && !testMode);
+    fillMissingEnglish();
+
+    storyCard.querySelectorAll("[data-en-id]").forEach(function(el){
+      el.addEventListener("click", function(){
+        var id = el.getAttribute("data-en-id");
+        var entry = customSentences.filter(function(e){ return e.id === id; })[0];
+        if (!entry) return;
+        var v = window.prompt("English meaning:", entry.en || "");
+        if (v === null) return;
+        entry.en = v.trim();
+        saveState();
+        render();
+      });
+    });
 
     storyCard.querySelectorAll(".tok").forEach(function(btn){
       btn.addEventListener("click", function(){
@@ -434,9 +491,18 @@
           }
         });
         rows += '</div>';
+        rows += '<input type="text" class="en-edit" data-en-li="' + li + '" placeholder="English meaning (translating…)">';
       });
       rows += '<button type="button" class="btn primary" id="saveCustomBtn" style="margin-top:4px;">Save ' + (lastLines.length > 1 ? lastLines.length + ' sentences' : 'sentence') + '</button>';
       previewArea.innerHTML = rows;
+      lastLines.forEach(function(chars, li){
+        translateToEnglish(chars.join("")).then(function(en){
+          var inp = previewArea.querySelector('input[data-en-li="' + li + '"]');
+          if (!inp) return;
+          if (!inp.value && en) inp.value = en;
+          inp.placeholder = "English meaning";
+        });
+      });
 
       document.getElementById("saveCustomBtn").addEventListener("click", function(){
         lastLines.forEach(function(chars, li){
@@ -450,7 +516,8 @@
               tokens.push([ch]);
             }
           });
-          customSentences.push({ id: makeId(), tokens: tokens });
+          var enEl = previewArea.querySelector('input[data-en-li="' + li + '"]');
+          customSentences.push({ id: makeId(), tokens: tokens, en: enEl ? enEl.value.trim() : "" });
         });
         saveState();
         render();
@@ -463,6 +530,12 @@
     pinyinOn = !pinyinOn;
     pinyinToggle.setAttribute("aria-pressed", String(pinyinOn));
     storyCard.classList.toggle("pinyin-on", pinyinOn);
+  });
+  englishToggle.addEventListener("click", function(){
+    englishOn = !englishOn;
+    englishToggle.setAttribute("aria-pressed", String(englishOn));
+    storyCard.classList.toggle("english-on", englishOn);
+    fillMissingEnglish();
   });
   document.getElementById("speakAllBtn").addEventListener("click", function(){
     speak(customSentences.map(function(entry){ return sentencePlainText(entry.tokens); }).join("，"));
@@ -477,6 +550,7 @@
     testModeBtn.textContent = testMode ? "🧪 Exit Testing" : "🧪 Start Testing";
     testModeBtn.setAttribute("aria-pressed", String(testMode));
     pinyinToggle.disabled = testMode;
+    englishToggle.disabled = testMode;
     speakAllBtn.disabled = testMode;
     render();
   });
